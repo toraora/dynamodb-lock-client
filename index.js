@@ -415,6 +415,7 @@ const Lock = function(config)
     // variable properties
     self._guid = self._config.guid;
     self._released = false;
+    self._heartbeatPromise = null;
 
     // public properties
     self.fencingToken = self._config.fencingToken;
@@ -423,55 +424,67 @@ const Lock = function(config)
     {
         const refreshLock = function()
         {
-            // refuse to refresh lock after maximumDurationMs
-            const now = (new Date()).getTime();
-            if (self._config.maximumDurationMs && (now - self._firstAcquisitionTime > self._config.maximumDurationMs)) {
-                return;
-            }
+            self._heartbeatPromise = new Promise((resolve) => {
+                if (self._released) {
+                    self._heartbeatPromise = null;
+                    resolve();
+                    return;
+                }
 
-            const newGuid = crypto.randomBytes(64);
-            const params =
-            {
-                TableName: self._config.lockTable,
-                Item:
-                {
-                    [self._config.partitionKey]: self._config.partitionID,
-                    fencingToken: self._config.fencingToken,
-                    leaseDurationMs: self._config.leaseDurationMs,
-                    owner: self._config.owner,
-                    guid: newGuid
-                },
-                ConditionExpression: `${buildAttributeExistsExpression(self)} and guid = :guid`,
-                ExpressionAttributeNames: buildExpressionAttributeNames(self),
-                ExpressionAttributeValues:
-                {
-                    ":guid": self._guid
+                // refuse to refresh lock after maximumDurationMs
+                const now = (new Date()).getTime();
+                if (self._config.maximumDurationMs && (now - self._firstAcquisitionTime > self._config.maximumDurationMs)) {
+                    return;
                 }
-            };
-            if (self._config.trustLocalTime)
-            {
-                params.Item.lockAcquiredTimeUnixMs = (new Date()).getTime();
-            }
-            if (self._config.sortKey)
-            {
-                params.Item[self._config.sortKey] = self._config.sortID;
-            }
-            self._config.dynamodb.put(params, (error, data) =>
+
+                const newGuid = crypto.randomBytes(64);
+                const params =
                 {
-                    if (error)
+                    TableName: self._config.lockTable,
+                    Item:
                     {
-                        if (self._config.errorOnHeartbeatFailure) {
-                            return self.emit("error", error);
+                        [self._config.partitionKey]: self._config.partitionID,
+                        fencingToken: self._config.fencingToken,
+                        leaseDurationMs: self._config.leaseDurationMs,
+                        owner: self._config.owner,
+                        guid: newGuid
+                    },
+                    ConditionExpression: `${buildAttributeExistsExpression(self)} and guid = :guid`,
+                    ExpressionAttributeNames: buildExpressionAttributeNames(self),
+                    ExpressionAttributeValues:
+                    {
+                        ":guid": self._guid
+                    }
+                };
+                if (self._config.trustLocalTime)
+                {
+                    params.Item.lockAcquiredTimeUnixMs = (new Date()).getTime();
+                }
+                if (self._config.sortKey)
+                {
+                    params.Item[self._config.sortKey] = self._config.sortID;
+                }
+                self._config.dynamodb.put(params, (error, data) =>
+                    {
+                        if (error)
+                        {
+                            self._heartbeatPromise = null;
+                            resolve();
+                            if (self._config.errorOnHeartbeatFailure) {
+                                return self.emit("error", error);
+                            }                        
                         }
-                        return;
+                        
+                        self._guid = newGuid;
+                        if (!self._released) // See https://github.com/tristanls/dynamodb-lock-client/issues/1
+                        {
+                            self.heartbeatTimeout = setTimeout(refreshLock, self._config.heartbeatPeriodMs);
+                        }
+                        self._heartbeatPromise = null;
+                        resolve();
                     }
-                    self._guid = newGuid;
-                    if (!self._released) // See https://github.com/tristanls/dynamodb-lock-client/issues/1
-                    {
-                        self.heartbeatTimeout = setTimeout(refreshLock, self._config.heartbeatPeriodMs);
-                    }
-                }
-            );
+                );
+            });
         };
         self.heartbeatTimeout = setTimeout(refreshLock, self._config.heartbeatPeriodMs);
     }
@@ -488,13 +501,24 @@ Lock.prototype.release = function(callback)
         clearTimeout(self.heartbeatTimeout);
         self.heartbeatTimeout = undefined;
     }
-    if (self._config.type == FailOpen)
-    {
-        return self._releaseFailOpen(callback);
+
+    function handleRelease() {
+        if (self._config.type == FailOpen)
+        {
+            return self._releaseFailOpen(callback);
+        }
+        else
+        {
+            return self._releaseFailClosed(callback);
+        }
     }
-    else
-    {
-        return self._releaseFailClosed(callback);
+    
+    if (self._heartbeatPromise !== null) {
+        self._heartbeatPromise.then(() => {
+            handleRelease();
+        });
+    } else {
+        handleRelease();
     }
 };
 
