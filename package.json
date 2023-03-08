@@ -1,6 +1,6 @@
 {
-  "name": "dynamodb-lock-client",
-  "version": "0.7.3",
+  "name": "@tora-dev/dynamodb-lock-client",
+  "version": "0.7.6",
   "description": "A general purpose distributed locking library built for AWS DynamoDB.",
   "scripts": {
     "inject-examples": "node scripts/injectExamples.js",
@@ -13,14 +13,15 @@
     "jest": "26.0.1"
   },
   "dependencies": {
-    "@hapi/joi": "17.1.1"
+    "@hapi/joi": "17.1.1",
+    "clone": "^2.1.2"
   },
   "peerDependencies": {
     "aws-sdk": "^2.508.0"
   },
   "repository": {
     "type": "git",
-    "url": "git@github.com:tristanls/dynamodb-lock-client.git"
+    "url": "git@github.com:toraora/dynamodb-lock-client.git"
   },
   "keywords": [
     "dynamodb",

@@ -375,6 +375,7 @@ FailOpen.prototype.acquireLock = function(id, callback)
                     fencingToken: dataBag.fencingToken,
                     guid: dataBag.guid,
                     heartbeatPeriodMs: self._config.heartbeatPeriodMs,
+                    maximumDurationMs: self._config.maximumDurationMs,
                     leaseDurationMs: self._config.leaseDurationMs,
                     lockTable: self._config.lockTable,
                     owner: dataBag.owner,
@@ -405,6 +406,8 @@ const Lock = function(config)
     const self = this;
     events.EventEmitter.call(self);
 
+    self._firstAcquisitionTime = (new Date()).getTime();
+
     // constant Lock configuration
     self._config = config;
 
@@ -419,6 +422,12 @@ const Lock = function(config)
     {
         const refreshLock = function()
         {
+            // refuse to refresh lock after maximumDurationMs
+            const now = (new Date()).getTime();
+            if (self._config.maximumDurationMs && (now - self._firstAcquisitionTime > self._config.maximumDurationMs)) {
+                return;
+            }
+
             const newGuid = crypto.randomBytes(64);
             const params =
             {
