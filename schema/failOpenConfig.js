@@ -17,6 +17,7 @@ const schema = Joi.object().keys(
         sortKey: Joi.string().invalid("fencingToken", "leaseDurationMs", "lockAcquiredTimeUnixMs", "owner", "guid"),
         heartbeatPeriodMs: Joi.number().integer().min(0),
         maximumDurationMs: Joi.number().integer().min(0),
+        errorOnHeartbeatFailure: Joi.boolean(),
         leaseDurationMs: Joi.number().integer().min(0).required(),
         trustLocalTime: Joi.boolean(),
         retryCount: Joi.number().integer().min(0)

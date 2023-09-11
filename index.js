@@ -376,6 +376,7 @@ FailOpen.prototype.acquireLock = function(id, callback)
                     guid: dataBag.guid,
                     heartbeatPeriodMs: self._config.heartbeatPeriodMs,
                     maximumDurationMs: self._config.maximumDurationMs,
+                    errorOnHeartbeatFailure: self._config.errorOnHeartbeatFailure,
                     leaseDurationMs: self._config.leaseDurationMs,
                     lockTable: self._config.lockTable,
                     owner: dataBag.owner,
@@ -459,7 +460,10 @@ const Lock = function(config)
                 {
                     if (error)
                     {
-                        return self.emit("error", error);
+                        if (self._config.errorOnHeartbeatFailure) {
+                            return self.emit("error", error);
+                        }
+                        return;
                     }
                     self._guid = newGuid;
                     if (!self._released) // See https://github.com/tristanls/dynamodb-lock-client/issues/1
