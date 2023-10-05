@@ -435,6 +435,8 @@ const Lock = function(config)
                 const now = (new Date()).getTime();
                 if (self._config.maximumDurationMs && (now - self._firstAcquisitionTime > self._config.maximumDurationMs)) {
                     return;
+                } else if (self._released) {
+                    return;
                 }
     
                 const newGuid = crypto.randomBytes(64);
