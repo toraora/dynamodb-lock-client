@@ -6,6 +6,7 @@ const Joi = require("@hapi/joi");
 const os = require("os");
 const pkg = require("./package.json");
 const util = require("util");
+const AsyncLock = require('async-lock'); // Local state locks
 
 const FailClosed = function(config)
 {
@@ -416,6 +417,11 @@ const Lock = function(config)
     self._guid = self._config.guid;
     self._released = false;
 
+    // Race conditions are created with timeout processes (`refresh` for HB) and other lock operations 
+    // like `release`
+    self._lock = new AsyncLock();
+    self._lockId = `${self._config.partitionID}:${self._config.sortID || ''}`;
+
     // public properties
     self.fencingToken = self._config.fencingToken;
 
@@ -423,55 +429,58 @@ const Lock = function(config)
     {
         const refreshLock = function()
         {
-            // refuse to refresh lock after maximumDurationMs
-            const now = (new Date()).getTime();
-            if (self._config.maximumDurationMs && (now - self._firstAcquisitionTime > self._config.maximumDurationMs)) {
-                return;
-            }
-
-            const newGuid = crypto.randomBytes(64);
-            const params =
-            {
-                TableName: self._config.lockTable,
-                Item:
-                {
-                    [self._config.partitionKey]: self._config.partitionID,
-                    fencingToken: self._config.fencingToken,
-                    leaseDurationMs: self._config.leaseDurationMs,
-                    owner: self._config.owner,
-                    guid: newGuid
-                },
-                ConditionExpression: `${buildAttributeExistsExpression(self)} and guid = :guid`,
-                ExpressionAttributeNames: buildExpressionAttributeNames(self),
-                ExpressionAttributeValues:
-                {
-                    ":guid": self._guid
+            self._lock.acquire(self._lockId, () => {
+                
+                // refuse to refresh lock after maximumDurationMs
+                const now = (new Date()).getTime();
+                if (self._config.maximumDurationMs && (now - self._firstAcquisitionTime > self._config.maximumDurationMs)) {
+                    return;
                 }
-            };
-            if (self._config.trustLocalTime)
-            {
-                params.Item.lockAcquiredTimeUnixMs = (new Date()).getTime();
-            }
-            if (self._config.sortKey)
-            {
-                params.Item[self._config.sortKey] = self._config.sortID;
-            }
-            self._config.dynamodb.put(params, (error, data) =>
+    
+                const newGuid = crypto.randomBytes(64);
+                const params =
                 {
-                    if (error)
+                    TableName: self._config.lockTable,
+                    Item:
                     {
-                        if (self._config.errorOnHeartbeatFailure) {
-                            return self.emit("error", error);
+                        [self._config.partitionKey]: self._config.partitionID,
+                        fencingToken: self._config.fencingToken,
+                        leaseDurationMs: self._config.leaseDurationMs,
+                        owner: self._config.owner,
+                        guid: newGuid
+                    },
+                    ConditionExpression: `${buildAttributeExistsExpression(self)} and guid = :guid`,
+                    ExpressionAttributeNames: buildExpressionAttributeNames(self),
+                    ExpressionAttributeValues:
+                    {
+                        ":guid": self._guid
+                    }
+                };
+                if (self._config.trustLocalTime)
+                {
+                    params.Item.lockAcquiredTimeUnixMs = (new Date()).getTime();
+                }
+                if (self._config.sortKey)
+                {
+                    params.Item[self._config.sortKey] = self._config.sortID;
+                }
+                self._config.dynamodb.put(params, (error, data) =>
+                    {
+                        if (error)
+                        {
+                            if (self._config.errorOnHeartbeatFailure) {
+                                return self.emit("error", error);
+                            }
+                            return;
                         }
-                        return;
+                        self._guid = newGuid;
+                        if (!self._released) // See https://github.com/tristanls/dynamodb-lock-client/issues/1
+                        {
+                            self.heartbeatTimeout = setTimeout(refreshLock, self._config.heartbeatPeriodMs);
+                        }
                     }
-                    self._guid = newGuid;
-                    if (!self._released) // See https://github.com/tristanls/dynamodb-lock-client/issues/1
-                    {
-                        self.heartbeatTimeout = setTimeout(refreshLock, self._config.heartbeatPeriodMs);
-                    }
-                }
-            );
+                );
+            });
         };
         self.heartbeatTimeout = setTimeout(refreshLock, self._config.heartbeatPeriodMs);
     }
@@ -481,21 +490,23 @@ util.inherits(Lock, events.EventEmitter);
 
 Lock.prototype.release = function(callback)
 {
-    const self = this;
-    self._released = true;
-    if (self.heartbeatTimeout)
-    {
-        clearTimeout(self.heartbeatTimeout);
-        self.heartbeatTimeout = undefined;
-    }
-    if (self._config.type == FailOpen)
-    {
-        return self._releaseFailOpen(callback);
-    }
-    else
-    {
-        return self._releaseFailClosed(callback);
-    }
+    this._lock.acquire(this._lockId, () => {
+        const self = this;
+        self._released = true;
+        if (self.heartbeatTimeout)
+        {
+            clearTimeout(self.heartbeatTimeout);
+            self.heartbeatTimeout = undefined;
+        }
+        if (self._config.type == FailOpen)
+        {
+            return self._releaseFailOpen(callback);
+        }
+        else
+        {
+            return self._releaseFailClosed(callback);
+        }
+    });
 };
 
 Lock.prototype._releaseFailClosed = function(callback)
