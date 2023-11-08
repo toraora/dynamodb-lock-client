@@ -434,6 +434,7 @@ const Lock = function(config)
                 // refuse to refresh lock after maximumDurationMs
                 const now = (new Date()).getTime();
                 if (self._config.maximumDurationMs && (now - self._firstAcquisitionTime > self._config.maximumDurationMs)) {
+                    resolve();
                     return;
                 }
 
