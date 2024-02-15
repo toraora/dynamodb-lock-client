@@ -281,6 +281,7 @@ FailOpen.prototype.acquireLock = function(id, callback)
             if (self._config.trustLocalTime)
             {
                 params.Item.lockAcquiredTimeUnixMs = (new Date()).getTime();
+                params.Item.lockFirstAcquiredTimeUnixMs = (new Date()).getTime();
             }
             if (dataBag.sortID)
             {
@@ -336,6 +337,7 @@ FailOpen.prototype.acquireLock = function(id, callback)
             if (self._config.trustLocalTime)
             {
                 params.Item.lockAcquiredTimeUnixMs = (new Date()).getTime();
+                params.Item.lockFirstAcquiredTimeUnixMs = (new Date()).getTime();
             }
             if (dataBag.sortID)
             {
