@@ -1379,3 +1379,86 @@ describe("FailOpen lock release", () =>
         );
     });
 });
+
+describe("FailOpen lock maximumDurationMs lockExpired event", () =>
+{
+    let config, dynamodb;
+    beforeEach(() =>
+        {
+            config =
+            {
+                lockTable: LOCK_TABLE,
+                partitionKey: PARTITION_KEY,
+                heartbeatPeriodMs: HEARTBEAT_PERIOD_MS,
+                leaseDurationMs: LEASE_DURATION_MS,
+                owner: OWNER
+            };
+            dynamodb =
+            {
+                delete: () => {},
+                get: (_, callback) => callback(undefined, {}),
+                put: (_, callback) => callback()
+            };
+        }
+    );
+
+    test("emits lockExpired event when maximumDurationMs is exceeded", done =>
+        {
+            const guid = crypto.randomBytes(64);
+            const lock = new DynamoDBLockClient.Lock(
+                {
+                    dynamodb,
+                    fencingToken: 1,
+                    guid,
+                    heartbeatPeriodMs: HEARTBEAT_PERIOD_MS,
+                    maximumDurationMs: 1,
+                    leaseDurationMs: LEASE_DURATION_MS,
+                    lockTable: LOCK_TABLE,
+                    owner: OWNER,
+                    partitionID: LOCK_ID,
+                    partitionKey: PARTITION_KEY,
+                    type: DynamoDBLockClient.FailOpen
+                }
+            );
+            lock.on("lockExpired", data =>
+                {
+                    expect(data.partitionID).toBe(LOCK_ID);
+                    expect(data.sortID).toBe(undefined);
+                    expect(data.maximumDurationMs).toBe(1);
+                    expect(typeof data.elapsedMs).toBe("number");
+                    expect(data.elapsedMs).toBeGreaterThanOrEqual(0);
+                    clearTimeout(lock.heartbeatTimeout);
+                    done();
+                }
+            );
+        }
+    );
+
+    test("does not emit lockExpired when maximumDurationMs is not configured", done =>
+        {
+            config.dynamodb = dynamodb;
+            // no maximumDurationMs configured
+            const failOpen = new DynamoDBLockClient.FailOpen(config);
+            failOpen.acquireLock(LOCK_ID, (error, lock) =>
+                {
+                    expect(error).toBe(undefined);
+                    lock.on("lockExpired", () =>
+                        {
+                            done(new Error("should not emit lockExpired"));
+                        }
+                    );
+                    // wait enough for a couple heartbeats, then release
+                    setTimeout(() =>
+                        {
+                            lock.release(err =>
+                                {
+                                    done();
+                                }
+                            );
+                        }, HEARTBEAT_PERIOD_MS * 3
+                    );
+                }
+            );
+        }
+    );
+});

@@ -438,6 +438,13 @@ const Lock = function(config)
                 if (self._config.maximumDurationMs && (now - self._firstAcquisitionTime > self._config.maximumDurationMs)) {
                     self._heartbeatPromise = null;
                     resolve();
+                    self.emit("lockExpired",
+                    {
+                        partitionID: self._config.partitionID,
+                        sortID: self._config.sortID,
+                        maximumDurationMs: self._config.maximumDurationMs,
+                        elapsedMs: now - self._firstAcquisitionTime
+                    });
                     return;
                 }
 
