@@ -232,7 +232,7 @@ Creates a "fail open" client that acquires "fail open" locks. If process crashes
      Sort key part of `id` is only required if lock is configured with a sort key. The types of partition key and sort key must correspond to lock table's partition key and sort key types.
   * `callback`: _Function_ `(error, lock) => {}`
     * `error`: _Error_ Error, if any.
-    * `lock`: _DynamoDBLockClient.Lock_ Successfully acquired lock object. Lock object is an instance of `EventEmitter`. If the `lock` is acquired via a fail open `client` configured to heartbeat, then the returned `lock` may emit an `error` event if a `heartbeat` operation fails.
+    * `lock`: _DynamoDBLockClient.Lock_ Successfully acquired lock object. Lock object is an instance of `EventEmitter`. If the `lock` is acquired via a fail open `client` configured to heartbeat, then the returned `lock` may emit an `error` event if a `heartbeat` operation fails. If `maximumDurationMs` is configured, the `lock` will emit a `lockExpired` event when the maximum duration is exceeded and heartbeats stop. The event payload is `{ partitionID, sortID, maximumDurationMs, elapsedMs }`.
       * `fencingToken`: _Integer_ **fail open locks only** Integer monotonically incremented with every "fail open" lock acquisition to be used for [fencing](https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html#making-the-lock-safe-with-fencing). Heartbeats do not increment `fencingToken`.
 
 Attempts to acquire a lock. If lock acquisition fails, callback will be called with an `error` and `lock` will be falsy. If lock acquisition succeeds, callback will be called with `lock`, and `error` will be falsy.
