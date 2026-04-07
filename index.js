@@ -243,6 +243,20 @@ FailOpen.prototype.acquireLock = function(id, callback)
                     dataBag.lock = data.Item;
                     dataBag.fencingToken = dataBag.lock.fencingToken + 1;
                     const leaseDurationMs = parseInt(dataBag.lock.leaseDurationMs);
+
+                    // Check if there's already a non-stale waiter
+                    if (self._config.failIfContested && dataBag.lock.waiterSince)
+                    {
+                        const waiterAge = Date.now() - dataBag.lock.waiterSince;
+                        const maxWaitTime = leaseDurationMs * 2;
+                        if (waiterAge < maxWaitTime)
+                        {
+                            const err = new Error("Lock already has a waiter.");
+                            err.code = "LockContested";
+                            return callback(err);
+                        }
+                    }
+
                     let timeout;
                     if (self._config.trustLocalTime)
                     {
@@ -254,11 +268,48 @@ FailOpen.prototype.acquireLock = function(id, callback)
                     {
                         timeout = leaseDurationMs;
                     }
-                    return setTimeout(
-                        () => workflow.emit("acquire existing lock", dataBag),
-                        timeout
-                    );
+
+                    // Signal that we're waiting
+                    return workflow.emit("register waiter", dataBag, timeout);
                 }
+            );
+        }
+    );
+    workflow.on("register waiter", (dataBag, timeout) =>
+        {
+            const updateWaiterTimestamp = () =>
+            {
+                const updateParams =
+                {
+                    TableName: self._config.lockTable,
+                    Key:
+                    {
+                        [self._config.partitionKey]: dataBag.partitionID
+                    },
+                    UpdateExpression: "SET waiterSince = :now",
+                    ExpressionAttributeValues:
+                    {
+                        ":now": Date.now()
+                    }
+                };
+                if (self._config.sortKey)
+                {
+                    updateParams.Key[self._config.sortKey] = dataBag.sortID;
+                }
+                self._config.dynamodb.update(updateParams, () => {});
+            };
+
+            // Set initial waiter timestamp
+            updateWaiterTimestamp();
+
+            // Start waiter heartbeat to keep waiterSince fresh
+            const leaseDurationMs = parseInt(self._config.leaseDurationMs);
+            dataBag.waiterHeartbeat = setInterval(updateWaiterTimestamp, leaseDurationMs / 2);
+
+            // Wait for lease to expire then try to acquire
+            setTimeout(
+                () => workflow.emit("acquire existing lock", dataBag),
+                timeout
             );
         }
     );
@@ -315,6 +366,13 @@ FailOpen.prototype.acquireLock = function(id, callback)
     );
     workflow.on("acquire existing lock", dataBag =>
         {
+            // Clear waiter heartbeat since we're attempting to acquire
+            if (dataBag.waiterHeartbeat)
+            {
+                clearInterval(dataBag.waiterHeartbeat);
+                dataBag.waiterHeartbeat = undefined;
+            }
+
             const params =
             {
                 TableName: self._config.lockTable,
@@ -325,6 +383,7 @@ FailOpen.prototype.acquireLock = function(id, callback)
                     leaseDurationMs: self._config.leaseDurationMs,
                     owner: dataBag.owner,
                     guid: dataBag.guid
+                    // waiterSince intentionally omitted - put replaces entire item
                 },
                 ConditionExpression: `${buildAttributeNotExistsExpression(self)} or (guid = :guid and fencingToken = :fencingToken)`,
                 ExpressionAttributeNames: buildExpressionAttributeNames(self),

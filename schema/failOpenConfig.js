@@ -9,18 +9,20 @@ const schema = Joi.object().keys(
             {
                 delete: Joi.func().required(),
                 get: Joi.func().required(),
-                put: Joi.func().required()
+                put: Joi.func().required(),
+                update: Joi.func()
             }
         ).unknown().required(),
         lockTable: Joi.string().required(),
-        partitionKey: Joi.string().invalid("fencingToken", "leaseDurationMs", "lockAcquiredTimeUnixMs", "owner", "guid").required(),
-        sortKey: Joi.string().invalid("fencingToken", "leaseDurationMs", "lockAcquiredTimeUnixMs", "owner", "guid"),
+        partitionKey: Joi.string().invalid("fencingToken", "leaseDurationMs", "lockAcquiredTimeUnixMs", "owner", "guid", "waiterSince").required(),
+        sortKey: Joi.string().invalid("fencingToken", "leaseDurationMs", "lockAcquiredTimeUnixMs", "owner", "guid", "waiterSince"),
         heartbeatPeriodMs: Joi.number().integer().min(0),
         maximumDurationMs: Joi.number().integer().min(0),
         errorOnHeartbeatFailure: Joi.boolean(),
         leaseDurationMs: Joi.number().integer().min(0).required(),
         trustLocalTime: Joi.boolean(),
-        retryCount: Joi.number().integer().min(0)
+        retryCount: Joi.number().integer().min(0),
+        failIfContested: Joi.boolean()
     }
 ).required();
 
